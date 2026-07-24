@@ -20,7 +20,10 @@ export const createBooking = async (req, res, next) => {
 
     if (activeBooking) {
       return next(
-        new ApiError(400, `You already have an active/pending booking (Status: ${activeBooking.status})`)
+        new ApiError(
+          400,
+          `You can only book one hostel at a time. You already have a ${activeBooking.status} booking. Please check out of your current hostel before applying to a new one.`
+        )
       );
     }
 
@@ -29,26 +32,45 @@ export const createBooking = async (req, res, next) => {
       return next(new ApiError(404, 'Hostel not found'));
     }
 
-    // Find any room of requested type in the hostel to calculate rent
-    const sampleRoom = await Room.findOne({ hostelId, type: roomType });
-    if (!sampleRoom) {
+    // Find a room of the requested type that actually has a vacant bed right
+    // now (not just any room of that type — one that may already be full).
+    // Pick the cheapest such room to calculate rent, since the specific bed
+    // isn't assigned until an admin approves the request.
+    const availableRoom = await Room.findOne({
+      hostelId,
+      type: roomType,
+      status: { $ne: 'maintenance' },
+      $expr: { $lt: [{ $size: '$currentOccupants' }, '$capacity'] },
+    }).sort({ rent: 1 });
+
+    if (!availableRoom) {
       return next(
-        new ApiError(404, `No rooms of type '${roomType}' found in this hostel`)
+        new ApiError(404, `No '${roomType}' rooms are currently available in this hostel`)
       );
     }
+    const sampleRoom = availableRoom;
 
-    // Calculate stay duration in months
+    // Calculate stay duration in calendar months (not days / 30 — most
+    // calendar months are 31, 28, or 29 days, so a plain 1-month stay like
+    // Jan 1 -> Feb 1 is 31 days, and days/30 rounded that up to 2 months,
+    // silently doubling the rent shown to the student). Count full calendar
+    // months between the two dates, rounding any partial trailing month up.
     const checkIn = new Date(checkInDate);
     const checkOut = new Date(checkOutDate);
-    const diffTime = Math.abs(checkOut - checkIn);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    const months = Math.max(1, Math.ceil(diffDays / 30));
+    let months =
+      (checkOut.getFullYear() - checkIn.getFullYear()) * 12 +
+      (checkOut.getMonth() - checkIn.getMonth());
+    if (checkOut.getDate() > checkIn.getDate()) {
+      months += 1; // stayed a few extra days past a full month — round up
+    }
+    months = Math.max(1, months);
 
     const totalAmount = sampleRoom.rent * months;
 
     const booking = await Booking.create({
       userId,
       hostelId,
+      roomType,
       checkInDate: checkIn,
       checkOutDate: checkOut,
       totalAmount,
@@ -65,6 +87,15 @@ export const createBooking = async (req, res, next) => {
 
     res.status(201).json(new ApiResponse(201, booking, 'Booking request submitted successfully'));
   } catch (error) {
+    // SECURITY: if two requests from the same user race past the app-level
+    // check above, the partial unique index on Booking rejects the second
+    // insert at the DB level (error code 11000). Surface that as a normal
+    // 400 instead of a raw duplicate-key 500.
+    if (error?.code === 11000) {
+      return next(
+        new ApiError(400, 'You can only book one hostel at a time. You already have an active booking.')
+      );
+    }
     next(error);
   }
 };
@@ -155,6 +186,19 @@ export const updateBookingStatus = async (req, res, next) => {
     // hostel_admin may only act on bookings for their own assigned hostel
     if (!ensureOwnHostel(req, next, booking.hostelId)) return;
 
+    // SECURITY: enforce a valid state machine. Without this, a booking that
+    // was already approved/rejected/cancelled/checked-out could be
+    // re-processed (e.g. re-approving a checked-out booking would silently
+    // re-add the student as a room occupant without a fresh request).
+    if ((status === 'approved' || status === 'rejected') && booking.status !== 'pending') {
+      return next(
+        new ApiError(400, `This booking has already been ${booking.status} and cannot be ${status} again.`)
+      );
+    }
+    if (status === 'cancelled' && !['pending', 'approved'].includes(booking.status)) {
+      return next(new ApiError(400, `A ${booking.status} booking cannot be cancelled.`));
+    }
+
     const hostel = await Hostel.findById(booking.hostelId);
     const hostelName = hostel ? hostel.name : 'Hostel';
 
@@ -163,30 +207,43 @@ export const updateBookingStatus = async (req, res, next) => {
         return next(new ApiError(400, 'Room ID is required to approve booking'));
       }
 
-      const room = await Room.findById(roomId);
-      if (!room) {
+      const roomToCheck = await Room.findById(roomId);
+      if (!roomToCheck) {
         return next(new ApiError(404, 'Room not found'));
       }
-
-      if (room.hostelId.toString() !== booking.hostelId.toString()) {
+      if (roomToCheck.hostelId.toString() !== booking.hostelId.toString()) {
         return next(new ApiError(400, 'Room does not belong to the selected hostel'));
       }
 
-      if (room.currentOccupants.length >= room.capacity) {
-        return next(new ApiError(400, 'Selected room is already at full capacity'));
+      // SECURITY: assign the occupant with a single atomic update instead of
+      // "read capacity, then write" — two admins approving different bookings
+      // into the same last-available bed at the same moment could otherwise
+      // both pass the capacity check and overbook the room. The $expr guard
+      // re-checks capacity as part of the same atomic operation.
+      const room = await Room.findOneAndUpdate(
+        {
+          _id: roomId,
+          status: { $ne: 'maintenance' },
+          currentOccupants: { $ne: booking.userId._id },
+          $expr: { $lt: [{ $size: '$currentOccupants' }, '$capacity'] },
+        },
+        { $push: { currentOccupants: booking.userId._id } },
+        { new: true }
+      );
+
+      if (!room) {
+        return next(new ApiError(400, 'Selected room is already at full capacity or unavailable'));
       }
 
-      // Assign room
+      if (room.currentOccupants.length >= room.capacity && room.status !== 'full') {
+        room.status = 'full';
+        await room.save();
+      }
+
+      // Assign room to booking
       booking.roomId = roomId;
       booking.assignedRoomNumber = room.roomNumber;
       booking.status = 'approved';
-
-      // Add user as occupant
-      room.currentOccupants.push(booking.userId._id);
-      if (room.currentOccupants.length >= room.capacity) {
-        room.status = 'full';
-      }
-      await room.save();
 
       // Notify user
       await Notification.create({
@@ -245,8 +302,96 @@ export const updateBookingStatus = async (req, res, next) => {
       });
     }
 
-    await booking.save();
+    await booking.save({ validateBeforeSave: false });
     res.status(200).json(new ApiResponse(200, booking, `Booking status successfully updated to ${status}`));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const requestCheckout = async (req, res, next) => {
+  try {
+    const { id } = req.params; // Booking ID
+    const userId = req.user._id;
+
+    const booking = await Booking.findById(id).populate('hostelId', 'name');
+    if (!booking) {
+      return next(new ApiError(404, 'Booking not found'));
+    }
+
+    if (booking.userId.toString() !== userId.toString()) {
+      return next(new ApiError(403, 'You do not have permission to modify this booking'));
+    }
+
+    if (booking.status !== 'approved') {
+      return next(new ApiError(400, 'You can only apply for check out from an approved, active stay'));
+    }
+
+    if (booking.checkoutRequested) {
+      return next(new ApiError(400, 'You have already applied for check out. Awaiting admin confirmation.'));
+    }
+
+    booking.checkoutRequested = true;
+    booking.checkoutRequestedAt = new Date();
+    await booking.save({ validateBeforeSave: false });
+
+    // Notify the hostel admin managing this booking's hostel (and super admins)
+    // so they know a resident is waiting on a checkout to be finalized.
+    const hostel = await Hostel.findById(booking.hostelId._id || booking.hostelId);
+    const notifyRecipients = [];
+    if (hostel?.admin) notifyRecipients.push(hostel.admin);
+
+    if (notifyRecipients.length > 0) {
+      await Notification.create(
+        notifyRecipients.map((recipientId) => ({
+          userId: recipientId,
+          title: 'Checkout Requested',
+          message: `${req.user.name} has applied to check out of ${hostel.name}. Please review and finalize.`,
+          type: 'booking',
+        }))
+      );
+    }
+
+    await Notification.create({
+      userId,
+      title: 'Checkout Application Submitted',
+      message: `Your request to check out of ${booking.hostelId?.name || 'your hostel'} has been submitted and is awaiting confirmation.`,
+      type: 'booking',
+    });
+
+    res.status(200).json(new ApiResponse(200, booking, 'Checkout application submitted successfully'));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const declineCheckoutRequest = async (req, res, next) => {
+  try {
+    const { id } = req.params; // Booking ID
+
+    const booking = await Booking.findById(id).populate('userId', 'name email');
+    if (!booking) {
+      return next(new ApiError(404, 'Booking not found'));
+    }
+
+    if (!ensureOwnHostel(req, next, booking.hostelId)) return;
+
+    if (!booking.checkoutRequested) {
+      return next(new ApiError(400, 'This booking has no pending checkout request'));
+    }
+
+    booking.checkoutRequested = false;
+    booking.checkoutRequestedAt = undefined;
+    await booking.save({ validateBeforeSave: false });
+
+    await Notification.create({
+      userId: booking.userId._id,
+      title: 'Checkout Request Declined',
+      message: 'Your checkout application was declined by the hostel admin. You remain checked into your room.',
+      type: 'booking',
+    });
+
+    res.status(200).json(new ApiResponse(200, booking, 'Checkout request declined; resident remains checked in'));
   } catch (error) {
     next(error);
   }
@@ -281,7 +426,8 @@ export const checkoutStudent = async (req, res, next) => {
     }
 
     booking.status = 'checked_out';
-    await booking.save();
+    booking.checkoutRequested = false;
+    await booking.save({ validateBeforeSave: false });
 
     // Notify user
     await Notification.create({

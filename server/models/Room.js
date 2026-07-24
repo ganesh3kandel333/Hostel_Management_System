@@ -1,5 +1,8 @@
 import mongoose from 'mongoose';
 
+
+export const FIXED_CAPACITY_BY_TYPE = { Single: 1, Double: 2, Triple: 3 };
+
 const roomSchema = new mongoose.Schema(
   {
     hostelId: {
@@ -49,6 +52,15 @@ const roomSchema = new mongoose.Schema(
 
 // Ensure room numbers are unique within a single hostel
 roomSchema.index({ hostelId: 1, roomNumber: 1 }, { unique: true });
+
+
+roomSchema.pre('validate', function (next) {
+  const fixedCapacity = FIXED_CAPACITY_BY_TYPE[this.type];
+  if (fixedCapacity !== undefined) {
+    this.capacity = fixedCapacity;
+  }
+  next();
+});
 
 const Room = mongoose.model('Room', roomSchema);
 export default Room;

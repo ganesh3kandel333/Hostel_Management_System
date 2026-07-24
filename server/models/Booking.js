@@ -16,6 +16,11 @@ const bookingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Room',
     },
+    roomType: {
+      type: String,
+      enum: ['Single', 'Double', 'Triple', 'Dorm'],
+      required: [true, 'Requested room type is required'],
+    },
     checkInDate: {
       type: Date,
       required: [true, 'Check-in date is required'],
@@ -41,6 +46,14 @@ const bookingSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+ 
+    checkoutRequested: {
+      type: Boolean,
+      default: false,
+    },
+    checkoutRequestedAt: {
+      type: Date,
+    },
   },
   {
     timestamps: true,
@@ -48,4 +61,14 @@ const bookingSchema = new mongoose.Schema(
 );
 
 const Booking = mongoose.model('Booking', bookingSchema);
+
+bookingSchema.index(
+  { userId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $in: ['pending', 'approved'] } },
+    name: 'one_active_booking_per_user',
+  }
+);
+
 export default Booking;

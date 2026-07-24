@@ -25,12 +25,6 @@ const userSchema = new mongoose.Schema(
       enum: ['super_admin', 'hostel_admin', 'student'],
       default: 'student',
     },
-    isVerified: {
-      type: Boolean,
-      default: false,
-    },
-    verificationToken: String,
-    verificationTokenExpires: Date,
     resetPasswordToken: String,
     resetPasswordExpires: Date,
     refreshToken: String,
@@ -51,9 +45,7 @@ const userSchema = new mongoose.Schema(
       enum: ['pending_approval', 'active', 'suspended'],
       default: 'active',
     },
-    // Only set when role === 'hostel_admin'. Scopes this admin to a single hostel:
-    // they may only view/manage rooms, bookings, complaints, and residents
-    // belonging to this hostel.
+    
     assignedHostel: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Hostel',

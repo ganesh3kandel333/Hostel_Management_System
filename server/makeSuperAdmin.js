@@ -33,7 +33,6 @@ const makeSuperAdmin = async () => {
       console.log('User found! Elevating account status...');
       user.role = 'super_admin';
       user.status = 'active';
-      user.isVerified = true;
       
       if (password) {
         console.log('Updating user password...');
@@ -66,7 +65,6 @@ const makeSuperAdmin = async () => {
         password: password, // The model pre-save hook will hash this plain text password automatically
         role: 'super_admin',
         status: 'active',
-        isVerified: true
       });
 
       console.log('\n======================================================');

@@ -1,0 +1,201 @@
+@import "tailwindcss";
+
+@theme {
+  /* Design System Theme Colors — Coral / Red hostel theme */
+  --color-primary: #e6472d;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #c73a22;
+  --color-on-primary-container: #f3b8a3;
+  --color-secondary: #ff7a54;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #ff8f6b;
+  --color-on-secondary-container: #fff8f6;
+  --color-tertiary: #611e00;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #872d00;
+  --color-on-tertiary-container: #ffa583;
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+  --color-background: #ffffff;
+  --color-on-background: #2a1a12;
+  --color-surface: #ffffff;
+  --color-on-surface: #2a1a12;
+  --color-surface-dim: #f2efed;
+  --color-surface-bright: #ffffff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f7f5f4;
+  --color-surface-container: #f1eeec;
+  --color-surface-container-high: #ebe7e4;
+  --color-surface-container-highest: #e3ddd8;
+  --color-on-surface-variant: #6b5c54;
+  --color-outline: #9c8b83;
+  --color-outline-variant: #eaddd5;
+
+  /* Override original styles for light theme compatibility.
+     Text tokens (300/200/100) are kept dark on purpose — they sit on
+     light cards now, so dark text is what stays readable. */
+  --color-indigo-600: #e6472d;
+  --color-indigo-500: #e6472d;
+  --color-indigo-400: #e6472d;
+  --color-indigo-300: #c73a22;
+
+  --color-slate-900: #ffffff;
+  --color-slate-800: #f7f5f4;
+
+  --color-gray-900: #2a1a12;
+  --color-gray-800: #eaddd5;
+  --color-gray-600: #6b5c54;
+  --color-gray-500: #9c8b83;
+  --color-gray-400: #6b5c54;
+  --color-gray-300: #2a1a12;
+  --color-gray-200: #2a1a12;
+  --color-gray-100: #2a1a12;
+
+  /* Typography scale */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-serif: 'Georgia', 'Times New Roman', serif;
+  --text-xl: 2rem; /* 32px headline-xl */
+  --text-lg: 1.5rem; /* 24px headline-lg */
+  --text-md: 1.25rem; /* 20px headline-md */
+  --text-base: 1rem; /* 16px body-lg */
+  --text-sm: 0.875rem; /* 14px body-md / label-md */
+  --text-xs: 0.75rem; /* 12px body-sm / label-sm */
+
+  /* Border radius tokens */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --radius-full: 9999px;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-on-background);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+  }
+
+  /* Custom warm-theme scrollbars */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--color-surface-container-low);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-outline-variant);
+    border-radius: var(--radius-sm);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-outline);
+  }
+
+  /* Force warm theme colors on input fields */
+  input, select, textarea {
+    background-color: var(--color-surface-container-lowest) !important;
+    color: var(--color-on-surface) !important;
+    border: 1px solid var(--color-outline-variant) !important;
+    border-radius: var(--radius-lg) !important;
+  }
+
+  /* NOTE: previously this rule force-applied pill radius + fixed 1.1rem side
+     padding to every text/date/search input via !important. That silently
+     overrode component-level padding (e.g. pl-10/pr-10 used to make room for
+     a left/right icon), causing icons to visually overlap the input text or
+     placeholder wherever an icon was used (search bars, the hostel select,
+     date pickers, password-toggle fields). Pill shape is now opt-in via
+     `.input-pill` so it never fights icon spacing set by individual forms. */
+
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--color-primary) !important;
+    outline: 2px solid rgba(230, 71, 45, 0.18) !important;
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: var(--color-on-surface-variant) !important;
+    opacity: 0.6;
+  }
+
+  button {
+    cursor: pointer;
+  }
+}
+
+/* Opt-in capsule/pill shape for inputs that intentionally want it and have
+   no left/right icon competing for padding (e.g. the Home hero search bar) */
+.input-pill {
+  border-radius: var(--radius-full) !important;
+  padding-left: 1.1rem !important;
+  padding-right: 1.1rem !important;
+}
+
+/* Glassmorphism panels redefined for warm tonal layering */
+.glass-panel {
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
+  box-shadow: 0 4px 12px -2px rgba(42, 26, 18, 0.06);
+}
+
+.glass-card {
+  background: var(--color-surface-container-low);
+  border: 1px solid var(--color-outline-variant);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  background: var(--color-surface-container-lowest);
+  border-color: var(--color-primary);
+  box-shadow: 0 8px 16px -4px rgba(230, 71, 45, 0.1);
+}
+
+/* Base styles for tables to match Design System */
+table {
+  background-color: var(--color-surface-container-lowest);
+}
+
+thead tr {
+  background-color: var(--color-surface-container-low) !important;
+  color: var(--color-on-surface-variant) !important;
+}
+
+tbody tr {
+  border-bottom: 1px solid var(--color-surface-container) !important;
+}
+
+/* No !important here on purpose: a table row that needs a different hover
+   tint (e.g. Manage Users) sets its own hover:bg-* class, which should win.
+   This is just the fallback for tables that don't specify one. */
+tbody tr:hover {
+  background-color: var(--color-surface-container-low);
+}
+
+/* Navigation items style tweaks */
+nav {
+  background-color: var(--color-surface-container-lowest) !important;
+}
+
+aside {
+  background-color: var(--color-surface-container-lowest) !important;
+  border-right: 1px solid var(--color-outline-variant) !important;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}

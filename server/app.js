@@ -22,11 +22,19 @@ import roomRoutes from './routes/roomRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import complaintRoutes from './routes/complaintRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import heroSlideRoutes from './routes/heroSlideRoutes.js';
 
 const app = express();
 
 // Security HTTP Headers
-app.use(helmet());
+// crossOriginResourcePolicy must be relaxed to 'cross-origin' — otherwise Chrome/Firefox
+// block <img> tags on the frontend (different port/origin) from loading files served
+// from /uploads, which is why uploaded avatars/hostel photos looked "broken".
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 
 // CORS config
 const corsOptions = {
@@ -81,6 +89,7 @@ app.use('/api/rooms', roomRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/complaints', complaintRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/hero-slides', heroSlideRoutes);
 
 // Fallback: 404 Route Not Found
 app.use('*', (req, res, next) => {

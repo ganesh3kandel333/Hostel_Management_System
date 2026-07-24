@@ -18,9 +18,7 @@ export const authorize = (...roles) => {
   };
 };
 
-// Confirms a hostel_admin is acting only within their own assigned hostel.
-// Super admins are always allowed through. Returns true if allowed, otherwise
-// sends a 403 ApiError via `next` and returns false so callers can short-circuit.
+
 export const ensureOwnHostel = (req, next, hostelId) => {
   if (req.user.role === 'super_admin') return true;
 

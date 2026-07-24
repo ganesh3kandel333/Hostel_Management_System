@@ -40,48 +40,6 @@ const getTransporter = async () => {
 };
 
 /**
- * Sends a registration verification email
- */
-export const sendVerificationEmail = async (email, name, token) => {
-  const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify-email?token=${token}`;
-  
-  // Log locally for easy developer testing
-  logger.info(`--------------------------------------------------`);
-  logger.info(`[EMAIL SIMULATOR] Registration Verification Email for ${name} (${email}):`);
-  logger.info(`Link: ${verificationUrl}`);
-  logger.info(`--------------------------------------------------`);
-
-  const transporter = await getTransporter();
-  if (!transporter) return;
-
-  const mailOptions = {
-    from: process.env.EMAIL_FROM || '"Hostel Management System" <no-reply@hostel.com>',
-    to: email,
-    subject: 'Verify your Hostel Account',
-    html: `
-      <h2>Welcome, ${name}!</h2>
-      <p>Thank you for registering. Please verify your email by clicking the link below:</p>
-      <a href="${verificationUrl}" target="_blank" style="padding: 10px 20px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px; display: inline-block;">Verify Email</a>
-      <p>Or copy and paste this URL into your browser:</p>
-      <p>${verificationUrl}</p>
-      <br/>
-      <p>This link will expire in 24 hours.</p>
-    `,
-  };
-
-  try {
-    const info = await transporter.sendMail(mailOptions);
-    logger.info(`Verification email sent: ${info.messageId}`);
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) {
-      logger.info(`[PREVIEW] View email preview: ${previewUrl}`);
-    }
-  } catch (error) {
-    logger.error(`Error sending verification email: ${error.message}`);
-  }
-};
-
-/**
  * Sends a password reset email
  */
 export const sendPasswordResetEmail = async (email, name, token) => {

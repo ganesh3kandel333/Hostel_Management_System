@@ -17,7 +17,8 @@ router.get('/', attachUserIfPresent, getAllHostels);
 router.get('/:id', getHostelById);
 
 // Admin / Super Admin write permissions
-router.post('/', protect, authorize('super_admin'), uploadSingleImage('image'), createHostel);
+// hostel_admin may create their own hostel (limited to one, enforced in controller)
+router.post('/', protect, authorize('super_admin', 'hostel_admin'), uploadSingleImage('image'), createHostel);
 router.put('/:id', protect, authorize('super_admin', 'hostel_admin'), uploadSingleImage('image'), updateHostel);
 router.delete('/:id', protect, authorize('super_admin'), deleteHostel);
 

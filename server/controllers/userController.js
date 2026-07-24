@@ -1,5 +1,7 @@
 import User from '../models/User.js';
 import Hostel from '../models/Hostel.js';
+import Room from '../models/Room.js';
+import Booking from '../models/Booking.js';
 import ApiError from '../utils/ApiError.js';
 import ApiResponse from '../utils/ApiResponse.js';
 import { uploadToCloudinary } from '../config/cloudinary.js';
@@ -44,7 +46,6 @@ export const updateProfile = async (req, res, next) => {
       name: user.name,
       email: user.email,
       role: user.role,
-      isVerified: user.isVerified,
       avatar: user.avatar,
       phoneNumber: user.phoneNumber,
       gender: user.gender,
@@ -176,38 +177,112 @@ export const updateUserStatus = async (req, res, next) => {
   }
 };
 
-// Super Admin: Update User Role (super_admin, hostel_admin, student)
-export const updateUserRole = async (req, res, next) => {
+// Super Admin: Delete a user account permanently (replaces suspend for
+// removal — suspend/activate is still available for temporarily disabling
+// access, but a Super Admin can now fully delete a student or hostel_admin
+// account). super_admin accounts can never be deleted from here.
+export const deleteUser = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { role } = req.body;
-
-    if (!['super_admin', 'hostel_admin', 'student'].includes(role)) {
-      return next(new ApiError(400, 'Invalid role value'));
-    }
 
     const user = await User.findById(id);
     if (!user) {
       return next(new ApiError(404, 'User not found'));
     }
 
-    // If this user is being moved away from hostel_admin, release their hostel
-    // assignment so the hostel can be assigned to someone else.
-    if (user.role === 'hostel_admin' && role !== 'hostel_admin' && user.assignedHostel) {
-      await Hostel.findByIdAndUpdate(user.assignedHostel, { admin: null });
-      user.assignedHostel = null;
+    if (user.role === 'super_admin') {
+      return next(new ApiError(403, 'Super admin accounts cannot be deleted'));
     }
 
-    user.role = role;
+    // If this user is a hostel_admin managing a hostel, free that hostel up
+    if (user.role === 'hostel_admin' && user.assignedHostel) {
+      await Hostel.findByIdAndUpdate(user.assignedHostel, { admin: null });
+    }
+
+    // BUG FIX: deleting a student's account used to leave them sitting in
+    // Room.currentOccupants forever, so the room kept counting as occupied
+    // (or stuck on "full") and a new student could never be assigned that
+    // bed even though the account no longer existed. Release every room
+    // this user currently occupies, and cancel any pending/approved
+    // bookings tied to them so nothing orphaned is left behind.
+    const occupiedRooms = await Room.find({ currentOccupants: user._id });
+    for (const room of occupiedRooms) {
+      room.currentOccupants = room.currentOccupants.filter(
+        (occupantId) => occupantId.toString() !== user._id.toString()
+      );
+      room.status = 'available';
+      await room.save();
+    }
+
+    await Booking.updateMany(
+      { userId: user._id, status: { $in: ['pending', 'approved'] } },
+      { status: 'cancelled', rejectionReason: 'Account deleted' }
+    );
+
+    await User.findByIdAndDelete(id);
+
+    res.status(200).json(new ApiResponse(200, null, `${user.name}'s account has been permanently deleted`));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Super Admin: Update a Hostel Admin's own editable details (name, email,
+// phone, gender, and optionally reset their password). Completes the CRUD
+// set for hostel_admin accounts (Create -> createHostelAdmin, Read -> getAllUsers,
+// Update -> this, Delete -> deleteUser).
+export const updateHostelAdmin = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { name, email, phoneNumber, gender, password } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return next(new ApiError(404, 'User not found'));
+    }
+    if (user.role !== 'hostel_admin') {
+      return next(new ApiError(400, 'Only hostel_admin accounts can be edited here'));
+    }
+
+    if (email && email !== user.email) {
+      const existingUser = await User.findOne({ email, _id: { $ne: id } });
+      if (existingUser) {
+        return next(new ApiError(409, 'A user with this email already exists'));
+      }
+      user.email = email;
+    }
+
+    if (name) user.name = name;
+    if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
+    if (gender) user.gender = gender;
+
+    if (req.file) {
+      const avatarUrl = await uploadToCloudinary(req.file.buffer, 'avatars', req.file.originalname);
+      user.avatar = avatarUrl;
+    }
+
+    if (password) {
+      if (password.length < 6) {
+        return next(new ApiError(400, 'New password must be at least 6 characters long'));
+      }
+      user.password = password; // pre-save hook hashes this
+      user.refreshToken = undefined; // force re-login with the new password
+    }
+
     await user.save();
 
     res.status(200).json(
       new ApiResponse(
         200,
-        null,
-        role === 'hostel_admin'
-          ? `User role updated to ${role}. Don't forget to assign them a hostel.`
-          : `User role updated to ${role}`
+        {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          gender: user.gender,
+          avatar: user.avatar,
+        },
+        'Hostel Admin updated successfully'
       )
     );
   } catch (error) {
@@ -215,9 +290,20 @@ export const updateUserRole = async (req, res, next) => {
   }
 };
 
-// Super Admin: Create a Hostel Admin directly (active immediately, no approval needed)
-// and assign them to manage a specific hostel. The Super Admin must set the admin's
-// initial password themselves (compulsory) — it is never auto-generated.
+// Super Admin: Update User Role (super_admin, hostel_admin, student)
+// NOTE: Deliberately no updateUserRole endpoint. Roles are fixed at account
+// creation (student on signup, hostel_admin only via createHostelAdmin below,
+// super_admin only via seeding/DB). Allowing a role to be changed later opens
+// the door to broken hostel/room assignments and privilege-escalation bugs,
+// so this capability is intentionally not exposed.
+
+// Super Admin: Create a Hostel Admin directly (active immediately, no approval needed).
+// A hostel does NOT have to be selected up front — a Super Admin can create a bare
+// Hostel Admin account, and that admin can then log in and register (create) their
+// own hostel and rooms. If a hostelId IS supplied (and is not already taken), the
+// admin is assigned to it immediately, preserving the old workflow too.
+// The Super Admin must set the admin's initial password themselves (compulsory) —
+// it is never auto-generated.
 export const createHostelAdmin = async (req, res, next) => {
   try {
     const { name, email, phoneNumber, gender, hostelId, password } = req.body;
@@ -226,21 +312,19 @@ export const createHostelAdmin = async (req, res, next) => {
       return next(new ApiError(400, 'Name and email are required'));
     }
 
-    if (!hostelId) {
-      return next(new ApiError(400, 'A hostel must be selected for this admin to manage'));
-    }
-
     if (!password || password.length < 6) {
       return next(new ApiError(400, 'A password of at least 6 characters is required to create a Hostel Admin'));
     }
 
-    const hostel = await Hostel.findById(hostelId);
-    if (!hostel) {
-      return next(new ApiError(404, 'Selected hostel not found'));
-    }
-
-    if (hostel.admin) {
-      return next(new ApiError(409, 'This hostel already has an assigned admin. Reassign or remove the existing admin first.'));
+    let hostel = null;
+    if (hostelId) {
+      hostel = await Hostel.findById(hostelId);
+      if (!hostel) {
+        return next(new ApiError(404, 'Selected hostel not found'));
+      }
+      if (hostel.admin) {
+        return next(new ApiError(409, 'This hostel already has an assigned admin. Reassign or remove the existing admin first.'));
+      }
     }
 
     const existingUser = await User.findOne({ email });
@@ -261,13 +345,14 @@ export const createHostelAdmin = async (req, res, next) => {
       phoneNumber,
       gender,
       avatar: avatarUrl,
-      isVerified: true,
       status: 'active', // No pending approval - Super Admin created this account directly
-      assignedHostel: hostel._id,
+      assignedHostel: hostel ? hostel._id : null,
     });
 
-    hostel.admin = hostelAdmin._id;
-    await hostel.save();
+    if (hostel) {
+      hostel.admin = hostelAdmin._id;
+      await hostel.save();
+    }
 
     sendHostelAdminCredentialsEmail(hostelAdmin.email, hostelAdmin.name, password);
 
@@ -280,9 +365,11 @@ export const createHostelAdmin = async (req, res, next) => {
           email: hostelAdmin.email,
           role: hostelAdmin.role,
           status: hostelAdmin.status,
-          assignedHostel: { _id: hostel._id, name: hostel.name },
+          assignedHostel: hostel ? { _id: hostel._id, name: hostel.name } : null,
         },
-        'Hostel Admin created and assigned successfully. Login credentials have been emailed.'
+        hostel
+          ? 'Hostel Admin created and assigned successfully. Login credentials have been emailed.'
+          : 'Hostel Admin created successfully. They can now log in and register their own hostel. Login credentials have been emailed.'
       )
     );
   } catch (error) {

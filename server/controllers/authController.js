@@ -1,11 +1,10 @@
-import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import ApiError from '../utils/ApiError.js';
 import ApiResponse from '../utils/ApiResponse.js';
 import { generateAccessToken, generateRefreshToken } from '../utils/generateToken.js';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../services/emailService.js';
+import { sendPasswordResetEmail } from '../services/emailService.js';
 import { uploadToCloudinary } from '../config/cloudinary.js';
 
 // Helper to set refresh token in cookie
@@ -34,10 +33,6 @@ export const register = async (req, res, next) => {
       avatarUrl = await uploadToCloudinary(req.file.buffer, 'avatars', req.file.originalname);
     }
 
-    // Create verification token
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-    const verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-
     // SECURITY: public self-registration is for hostel users (students) only.
     // Super Admins are created via a one-time database script, and Hostel Admins
     // are created directly by a Super Admin, so role/status are never taken from the client here.
@@ -49,13 +44,8 @@ export const register = async (req, res, next) => {
       phoneNumber,
       gender,
       avatar: avatarUrl,
-      verificationToken,
-      verificationTokenExpires,
       status: 'active',
     });
-
-    // Send email (async, doesn't block response)
-    sendVerificationEmail(user.email, user.name, verificationToken);
 
     // Prepare response data (exclude password)
     const userResponse = {
@@ -63,7 +53,6 @@ export const register = async (req, res, next) => {
       name: user.name,
       email: user.email,
       role: user.role,
-      isVerified: user.isVerified,
       avatar: user.avatar,
     };
 
@@ -73,37 +62,9 @@ export const register = async (req, res, next) => {
         new ApiResponse(
           201,
           userResponse,
-          'Registration successful. Please check your email to verify your account.'
+          'Registration successful. You can now log in.'
         )
       );
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const verifyEmail = async (req, res, next) => {
-  try {
-    const { token } = req.query;
-
-    if (!token) {
-      return next(new ApiError(400, 'Verification token is missing'));
-    }
-
-    const user = await User.findOne({
-      verificationToken: token,
-      verificationTokenExpires: { $gt: Date.now() },
-    });
-
-    if (!user) {
-      return next(new ApiError(400, 'Invalid or expired verification token'));
-    }
-
-    user.isVerified = true;
-    user.verificationToken = undefined;
-    user.verificationTokenExpires = undefined;
-    await user.save();
-
-    res.status(200).json(new ApiResponse(200, null, 'Email verified successfully. You can now log in.'));
   } catch (error) {
     next(error);
   }
@@ -169,7 +130,6 @@ export const login = async (req, res, next) => {
       name: user.name,
       email: user.email,
       role: user.role,
-      isVerified: user.isVerified,
       avatar: user.avatar,
       phoneNumber: user.phoneNumber,
       gender: user.gender,

@@ -1,4 +1,4 @@
-import Room from '../models/Room.js';
+import Room, { FIXED_CAPACITY_BY_TYPE } from '../models/Room.js';
 import Hostel from '../models/Hostel.js';
 import ApiError from '../utils/ApiError.js';
 import ApiResponse from '../utils/ApiResponse.js';
@@ -57,6 +57,47 @@ export const getHostelRooms = async (req, res, next) => {
   }
 };
 
+// Public/student-facing: for a given hostel, return only the room types that
+// actually have a vacant bed right now (status 'available' and occupants
+// below capacity). Used by the booking form so a student only ever sees
+// "Single", "Double", etc. as an option when one is genuinely bookable —
+// showing a type with zero real availability just leads to a confused
+// student submitting a request that can never be approved.
+export const getAvailableRoomTypes = async (req, res, next) => {
+  try {
+    const { hostelId } = req.params;
+
+    const hostel = await Hostel.findById(hostelId);
+    if (!hostel) {
+      return next(new ApiError(404, 'Hostel not found'));
+    }
+
+    const rooms = await Room.find({
+      hostelId,
+      status: { $ne: 'maintenance' },
+      $expr: { $lt: [{ $size: '$currentOccupants' }, '$capacity'] },
+    });
+
+    // Group by room type: how many vacant beds, and the cheapest rent on offer
+    const summary = {};
+    for (const room of rooms) {
+      const vacancies = room.capacity - room.currentOccupants.length;
+      if (!summary[room.type]) {
+        summary[room.type] = { type: room.type, availableRooms: 0, availableBeds: 0, rent: room.rent };
+      }
+      summary[room.type].availableRooms += 1;
+      summary[room.type].availableBeds += vacancies;
+      summary[room.type].rent = Math.min(summary[room.type].rent, room.rent);
+    }
+
+    const availableTypes = Object.values(summary);
+
+    res.status(200).json(new ApiResponse(200, availableTypes, 'Available room types fetched successfully'));
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getRoomById = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -94,8 +135,23 @@ export const updateRoom = async (req, res, next) => {
       room.roomNumber = roomNumber;
     }
 
-    if (type) room.type = type;
-    if (capacity) {
+    if (type) {
+      const newFixedCapacity = FIXED_CAPACITY_BY_TYPE[type];
+      if (newFixedCapacity !== undefined && newFixedCapacity < room.currentOccupants.length) {
+        return next(
+          new ApiError(
+            400,
+            `Cannot change room type to ${type} (${newFixedCapacity} bed capacity) while it has ${room.currentOccupants.length} current occupant(s)`
+          )
+        );
+      }
+      room.type = type;
+    }
+
+    // Capacity is fixed by type for Single/Double/Triple (enforced on the
+    // model itself), so a submitted value only ever takes effect for Dorm.
+    const effectiveType = type || room.type;
+    if (capacity && FIXED_CAPACITY_BY_TYPE[effectiveType] === undefined) {
       if (capacity < room.currentOccupants.length) {
         return next(
           new ApiError(

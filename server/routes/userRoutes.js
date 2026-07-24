@@ -5,8 +5,9 @@ import {
   changePassword,
   getAllUsers,
   updateUserStatus,
-  updateUserRole,
   createHostelAdmin,
+  updateHostelAdmin,
+  deleteUser,
   assignHostelToAdmin,
 } from '../controllers/userController.js';
 import { protect } from '../middleware/authMiddleware.js';
@@ -23,8 +24,9 @@ router.put('/profile/change-password', protect, changePassword);
 // Admin-only operations
 router.get('/admin/all', protect, authorize('super_admin'), getAllUsers);
 router.post('/admin/hostel-admin', protect, authorize('super_admin'), uploadSingleImage('avatar'), createHostelAdmin);
+router.put('/admin/hostel-admin/:id', protect, authorize('super_admin'), uploadSingleImage('avatar'), updateHostelAdmin);
+router.delete('/admin/users/:id', protect, authorize('super_admin'), deleteUser);
 router.put('/admin/status/:id', protect, authorize('super_admin'), updateUserStatus);
-router.put('/admin/role/:id', protect, authorize('super_admin'), updateUserRole);
 router.put('/admin/assign-hostel/:id', protect, authorize('super_admin'), assignHostelToAdmin);
 
 export default router;
