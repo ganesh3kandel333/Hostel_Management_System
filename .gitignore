@@ -47,3 +47,8 @@ dist/
 build/
 coverage/
 .vscode/
+server/README.md
+client/README.md
+server/.env
+README.md
+**/.env

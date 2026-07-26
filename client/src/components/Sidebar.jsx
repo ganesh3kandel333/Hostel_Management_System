@@ -134,7 +134,7 @@ const Sidebar = ({ isOpen, onClose }) => {
                   `flex items-center gap-3 px-5 py-3 rounded-full text-sm font-semibold transition-all shadow-sm ${
                     isActive
                       ? 'bg-[#e6472d] text-white shadow-md'
-                      : 'bg-white text-[#6b5c54] hover:bg-[#fdece6]'
+                      : 'bg-white text-[#6b5c54] hover:bg-[#fffff]'
                   }`
                 }
               >
